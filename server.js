@@ -1,12 +1,16 @@
+// server.js
 require("dotenv").config();
 const express = require("express");
 const bodyParser = require("body-parser");
-const nodemailer = require("nodemailer");
 const cors = require("cors");
+const { Resend } = require("resend");
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
+
+// Initialize Resend
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Temporary in-memory store (for demo only)
 const otps = new Map(); // key: email -> { otp, expiresAt, attempts }
@@ -16,24 +20,9 @@ function generateOtp() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Nodemailer setup
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT || 587),
-  secure: process.env.SMTP_SECURE === "true", // true for 465, false for other ports
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
-
-// Verify SMTP connection immediately
-transporter.verify(function (error, success) {
-  if (error) {
-    console.error("SMTP Connection Error:", error);
-  } else {
-    console.log("✅ SMTP Server is ready to send emails");
-  }
+// ✅ Root route (for quick Render health check)
+app.get("/", (req, res) => {
+  res.send("✅ OTP Backend Server is running successfully!");
 });
 
 // API: Send OTP
@@ -43,23 +32,30 @@ app.post("/api/send-otp", async (req, res) => {
     if (!email) return res.status(400).json({ error: "Email is required" });
 
     const otp = generateOtp();
-    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
+    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes expiry
 
     otps.set(email, { otp, expiresAt, attempts: 0 });
 
     // Email content
-    const mailOptions = {
-      from: process.env.FROM_EMAIL || process.env.SMTP_USER,
+    const htmlContent = `
+      <div style="font-family:sans-serif;">
+        <h2>🔐 Your OTP Code</h2>
+        <p>Your OTP is <b>${otp}</b>. It will expire in <b>5 minutes</b>.</p>
+      </div>
+    `;
+
+    // Send email using Resend API
+    await resend.emails.send({
+      from: process.env.FROM_EMAIL || "noreply@yourdomain.com",
       to: email,
       subject: "Your OTP Code",
-      text: `Your OTP is ${otp}. It will expire in 5 minutes.`,
-      html: `<p>Your OTP code is <b>${otp}</b>. It expires in 5 minutes.</p>`,
-    };
+      html: htmlContent,
+    });
 
-    await transporter.sendMail(mailOptions);
+    console.log(`✅ OTP ${otp} sent to ${email}`);
     res.json({ message: "OTP sent successfully" });
   } catch (err) {
-    console.error("Error sending OTP:", err);
+    console.error("❌ Error sending OTP:", err);
     res.status(500).json({ error: "Failed to send OTP" });
   }
 });
@@ -87,6 +83,7 @@ app.post("/api/verify-otp", (req, res) => {
 
   if (otp === record.otp) {
     otps.delete(email);
+    console.log(`✅ OTP verified for ${email}`);
     return res.json({ message: "OTP verified successfully ✅" });
   } else {
     return res.status(400).json({ error: "Invalid OTP" });
