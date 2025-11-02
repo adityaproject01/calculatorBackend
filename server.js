@@ -1,3 +1,4 @@
+// server.js
 require("dotenv").config();
 const express = require("express");
 const bodyParser = require("body-parser");
@@ -8,17 +9,20 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// Initialize Resend (make sure your .env file has RESEND_API_KEY)
+// Initialize Resend
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Temporary in-memory OTP store
-const otps = new Map(); // key: email -> { otp, expiresAt, attempts }
+// In-memory OTP store
+const otps = new Map(); // email -> { otp, expiresAt }
 
+// Generate 6-digit OTP
 function generateOtp() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
+// --------------------
 // API: Send OTP
+// --------------------
 app.post("/api/send-otp", async (req, res) => {
   try {
     const { email } = req.body;
@@ -27,16 +31,17 @@ app.post("/api/send-otp", async (req, res) => {
     const otp = generateOtp();
     const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
 
-    otps.set(email, { otp, expiresAt, attempts: 0 });
+    otps.set(email, { otp, expiresAt });
 
-    // Send email using Resend
+    // Send OTP email via Resend
     await resend.emails.send({
-      from: process.env.FROM_EMAIL || "no-reply@yourdomain.com",
+      from: process.env.FROM_EMAIL || "no-reply@resend.dev",
       to: email,
       subject: "Your OTP Code",
-      html: `<p>Your OTP code is <b>${otp}</b>. It expires in 5 minutes.</p>`,
+      html: `<p>Your OTP code is <b>${otp}</b>. It will expire in 5 minutes.</p>`,
     });
 
+    console.log(`✅ OTP sent to ${email}`);
     res.json({ message: "OTP sent successfully" });
   } catch (err) {
     console.error("Error sending OTP:", err);
@@ -44,7 +49,9 @@ app.post("/api/send-otp", async (req, res) => {
   }
 });
 
+// --------------------
 // API: Verify OTP
+// --------------------
 app.post("/api/verify-otp", (req, res) => {
   const { email, otp } = req.body;
   if (!email || !otp)
@@ -59,12 +66,6 @@ app.post("/api/verify-otp", (req, res) => {
     return res.status(400).json({ error: "OTP expired" });
   }
 
-  record.attempts += 1;
-  if (record.attempts > 5) {
-    otps.delete(email);
-    return res.status(429).json({ error: "Too many attempts" });
-  }
-
   if (otp === record.otp) {
     otps.delete(email);
     return res.json({ message: "OTP verified successfully ✅" });
@@ -73,6 +74,8 @@ app.post("/api/verify-otp", (req, res) => {
   }
 });
 
+// --------------------
 // Start server
+// --------------------
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
