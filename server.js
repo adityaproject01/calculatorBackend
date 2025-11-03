@@ -3,22 +3,36 @@ require("dotenv").config();
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
-const { Resend } = require("resend");
+const nodemailer = require("nodemailer");
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// Initialize Resend
-const resend = new Resend(process.env.RESEND_API_KEY);
-
+// --------------------
 // In-memory OTP store
+// --------------------
 const otps = new Map(); // email -> { otp, expiresAt }
 
+// --------------------
 // Generate 6-digit OTP
+// --------------------
 function generateOtp() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
+
+// --------------------
+// Nodemailer setup
+// --------------------
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: process.env.SMTP_PORT,
+  secure: process.env.SMTP_SECURE === "true",
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
 
 // --------------------
 // API: Send OTP
@@ -31,14 +45,22 @@ app.post("/api/send-otp", async (req, res) => {
     const otp = generateOtp();
     const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
 
+    // Save OTP in memory
     otps.set(email, { otp, expiresAt });
 
-    // Send OTP email via Resend
-    await resend.emails.send({
-      from: process.env.FROM_EMAIL || "no-reply@resend.dev",
+    // Send OTP email via Gmail
+    await transporter.sendMail({
+      from: process.env.FROM_EMAIL,
       to: email,
       subject: "Your OTP Code",
-      html: `<p>Your OTP code is <b>${otp}</b>. It will expire in 5 minutes.</p>`,
+      html: `
+        <div style="font-family: Arial, sans-serif; text-align: center;">
+          <h2>OTP Verification</h2>
+          <p>Your OTP code is:</p>
+          <h1 style="color: #2d6cdf;">${otp}</h1>
+          <p>This OTP will expire in 5 minutes.</p>
+        </div>
+      `,
     });
 
     console.log(`✅ OTP sent to ${email}`);
