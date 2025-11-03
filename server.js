@@ -14,6 +14,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 // In-memory OTP store: email -> { otp, expiresAt }
 const otps = new Map();
 
+// Generate 6-digit OTP
 function generateOtp() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
@@ -27,15 +28,16 @@ app.post("/api/send-otp", async (req, res) => {
     if (!email) return res.status(400).json({ error: "Email is required" });
 
     const otp = generateOtp();
-    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 min expiry
+    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes expiry
 
     otps.set(email, { otp, expiresAt });
 
-    const emailInfo = await resend.emails.send({
-      from: process.env.FROM_EMAIL,
-      to: email,
+    // Send OTP dynamically
+    await resend.emails.send({
+      from: process.env.FROM_EMAIL, // e.g. your verified email
+      to: [email],
       subject: "Your OTP Code",
-      html: `<p>Your OTP code is <b>${otp}</b>. Expires in 5 minutes.</p>`,
+      html: `<p>Your OTP code is <b>${otp}</b>. It will expire in 5 minutes.</p>`,
     });
 
     console.log(`✅ OTP sent to ${email}`);
@@ -51,9 +53,8 @@ app.post("/api/send-otp", async (req, res) => {
 // --------------------
 app.post("/api/verify-otp", (req, res) => {
   const { email, otp } = req.body;
-
   if (!email || !otp)
-    return res.status(400).json({ error: "Email and OTP required" });
+    return res.status(400).json({ error: "Email and OTP are required" });
 
   const record = otps.get(email);
   if (!record)
